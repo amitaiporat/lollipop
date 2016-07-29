@@ -439,6 +439,74 @@ class Tuple(Type):
         )
 
 
+class OneOf(Type):
+    default_error_messages = {
+        'invalid': 'Invalid data',
+    }
+
+    def __init__(self, types, *args, **kwargs):
+        super(OneOf, self).__init__(*args, **kwargs)
+        self.types = types
+
+    def _dict_depth(self, value):
+        if not is_dict(value) or not value:
+            return 0
+
+        return 1 + max([self._dict_depth(v) for v in value.itervalues()])
+
+    def _total_errors(self, value):
+        if is_dict(value):
+            return sum([self._total_errors(v) for v in value.itervalues()])
+        elif is_list(value):
+            return len(value)
+        else:
+            return 1
+
+    def _best_error(self, error1, error2):
+        if is_dict(error1) and not is_dict(error2):
+            return error1
+        elif not is_dict(error1) and is_dict(error2):
+            return error2
+        else:
+            depth1 = self._dict_depth(error1)
+            depth2 = self._dict_depth(error2)
+            if depth1 != depth2:
+                return error1 if depth1 > depth2 else error2
+
+            if self._total_errors(error1) > self._total_errors(error2):
+                return error2
+
+            return error1
+
+    def load(self, data, *args, **kwargs):
+        if data is MISSING or data is None:
+            self._fail('required')
+
+        error = self._error_messages['invalid']
+        for item_type in self.types:
+            try:
+                result = item_type.load(data, *args, **kwargs)
+                return super(OneOf, self).load(result, *args, **kwargs)
+            except ValidationError as ve:
+                error = self._best_error(error, ve.messages)
+
+        raise ValidationError(error)
+
+    def dump(self, data, *args, **kwargs):
+        if data is MISSING or data is None:
+            self._fail('required')
+
+        error = self._error_messages['invalid']
+        for item_type in self.types:
+            try:
+                result = item_type.dump(data, *args, **kwargs)
+                return super(OneOf, self).dump(result, *args, **kwargs)
+            except ValidationError as ve:
+                error = self._best_error(error, ve.messages)
+
+        raise ValidationError(error)
+
+
 class DictWithDefault(object):
     def __init__(self, values={}, default=None):
         super(DictWithDefault, self).__init__()

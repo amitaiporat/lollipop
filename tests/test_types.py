@@ -2,7 +2,7 @@ import pytest
 from functools import partial
 import datetime
 from lollipop.types import MISSING, ValidationError, Type, Any, String, \
-    Number, Integer, Float, Boolean, DateTime, Date, Time, List, Dict, \
+    Number, Integer, Float, Boolean, DateTime, Date, Time, OneOf, List, Dict, \
     Field, AttributeField, MethodField, FunctionField, ConstantField, Object, \
     Optional, LoadOnly, DumpOnly
 from lollipop.errors import merge_errors
@@ -573,6 +573,32 @@ class TestDict(RequiredTestsMixin, ValidationTestsMixin):
         context = object()
         Dict(inner_type).dump({'foo': 123}, context)
         assert inner_type.dump_context == context
+
+
+class TestOneOf:
+    def test_loading_values_of_one_of_listed_types(self):
+        one_of = OneOf([Integer(), String()])
+        assert one_of.load('foo') == 'foo'
+        assert one_of.load(123) == 123
+
+    def test_loading_raises_ValidationError_if_value_is_of_unlisted_type(self):
+        one_of = OneOf([Integer(), String()])
+        with pytest.raises(ValidationError) as exc_info:
+            one_of.load({'foo': 'bar'})
+        assert exc_info.value.messages == OneOf.default_error_messages['invalid']
+
+    def test_loading_raises_ValidationError_if_deserialized_value_has_errors(self):
+        message = 'Something is wrong'
+        one_of = OneOf([
+            Object({'foo': String()}),
+            Object({'bar': Object({
+                'baz': Integer(validate=constant_fail_validator(message))
+            })}),
+        ])
+        with pytest.raises(ValidationError) as exc_info:
+            one_of.load({'bar': {'baz': 123}})
+        assert exc_info.value.messages == {'bar': {'baz': message}}
+
 
 class AttributeDummy:
     foo = 'hello'
